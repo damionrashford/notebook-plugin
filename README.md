@@ -128,9 +128,9 @@ The plugin uses three orchestrated agents:
 
 | Skill | Command | Purpose |
 |-------|---------|---------|
-| **ingest** | `/notebook:ingest <file>` | PDF/text ingestion with OCR into vector store |
-| **generate** | `/notebook:generate <type> [topic]` | Generate any of the 8 output types |
-| **dashboard** | `/notebook:dashboard` | Interactive HTML dashboard of sources and outputs |
+| [**ingest**](skills/ingest/SKILL.md) | `/notebook:ingest <file>` | PDF/text ingestion with OCR into vector store |
+| [**generate**](skills/generate/SKILL.md) | `/notebook:generate <type> [topic]` | Generate any of the 8 output types |
+| [**dashboard**](skills/ui/SKILL.md) | `/notebook:dashboard` | Interactive HTML dashboard of sources and outputs |
 
 ## Sample sources to get started
 
