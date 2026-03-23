@@ -1,0 +1,23 @@
+{
+  "title": "Quiz: Understanding Topic X",
+  "questions": [
+    {
+      "question": "Which of the following best describes X?",
+      "type": "multiple_choice",
+      "options": [
+        "Option A — plausible but incorrect",
+        "Option B — the correct answer",
+        "Option C — common misconception",
+        "Option D — partially correct"
+      ],
+      "answer": "B",
+      "explanation": "B is correct because... Options A, C, and D are incorrect because..."
+    },
+    {
+      "question": "Explain how Y impacts Z.",
+      "type": "short_answer",
+      "answer": "Y impacts Z by [model answer with key points to include].",
+      "explanation": "A strong answer should mention: 1) mechanism, 2) evidence, 3) significance."
+    }
+  ]
+}

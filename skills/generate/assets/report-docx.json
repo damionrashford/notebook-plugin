@@ -1,0 +1,25 @@
+{
+  "title": "Report Title",
+  "sections": [
+    {
+      "heading": "Executive Summary",
+      "body": "A concise overview of the key findings and recommendations from this analysis."
+    },
+    {
+      "heading": "Background",
+      "body": "Context, scope, and methodology used in this analysis."
+    },
+    {
+      "heading": "Key Findings",
+      "body": "Detailed findings with supporting evidence from the source material."
+    },
+    {
+      "heading": "Analysis",
+      "body": "Synthesis of findings, patterns observed, and implications."
+    },
+    {
+      "heading": "Conclusions & Recommendations",
+      "body": "Key takeaways and actionable next steps based on the analysis."
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "notebook-ingest",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "vectra": "^0.12.3",
+    "pdf-parse": "^1.1.1",
+    "@huggingface/transformers": "^3.4.1",
+    "tesseract.js": "^5.1.1",
+    "pdf-img-convert": "^1.2.1"
+  }
+}

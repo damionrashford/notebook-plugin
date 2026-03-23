@@ -1,0 +1,20 @@
+{
+  "name": "notebook-marketplace",
+  "owner": {
+    "name": "Damion Rashford"
+  },
+  "metadata": {
+    "description": "NotebookLM-style research assistant plugin for Claude Code — PDF ingestion, RAG, and 8 rich output types",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "notebook",
+      "source": "./",
+      "description": "NotebookLM-style research assistant — ingest PDFs, then generate audio overviews, slide decks, mind maps, reports, flashcards, quizzes, infographics, and data tables from your sources.",
+      "version": "1.0.0",
+      "category": "research",
+      "tags": ["notebook", "pdf", "rag", "research", "audio", "slides", "flashcards", "quiz", "mind-map", "infographic", "data-table", "ocr", "embeddings"]
+    }
+  ]
+}

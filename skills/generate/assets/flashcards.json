@@ -1,0 +1,17 @@
+[
+  {
+    "front": "What is the primary function of X?",
+    "back": "X serves to [detailed answer with key facts and context].",
+    "tags": ["definitions", "chapter-1"]
+  },
+  {
+    "front": "Explain the relationship between A and B.",
+    "back": "A and B are related through [clear explanation with evidence].",
+    "tags": ["relationships", "core-concepts"]
+  },
+  {
+    "front": "What are the three main characteristics of Y?",
+    "back": "1) First characteristic and why it matters.\n2) Second characteristic with evidence.\n3) Third characteristic and its implications.",
+    "tags": ["characteristics", "chapter-2"]
+  }
+]

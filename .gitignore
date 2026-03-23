@@ -1,0 +1,7 @@
+node_modules/
+dist/
+output/
+*.aiff
+*.mp3
+*.wav
+.DS_Store

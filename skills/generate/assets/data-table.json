@@ -1,0 +1,9 @@
+{
+  "title": "Comparison of Key Findings",
+  "headers": ["Category", "Finding", "Evidence", "Significance"],
+  "rows": [
+    ["Topic A", "Key result from analysis", "Source data point", "High"],
+    ["Topic B", "Another important finding", "Supporting evidence", "Medium"],
+    ["Topic C", "Third finding", "Data reference", "High"]
+  ]
+}

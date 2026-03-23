@@ -1,0 +1,30 @@
+{
+  "title": "Key Insights",
+  "subtitle": "A visual overview of the most important findings",
+  "sections": [
+    {
+      "title": "Finding #1",
+      "content": "Detailed explanation of this finding and why it matters.",
+      "icon": "📊",
+      "stat": {
+        "value": "42%",
+        "label": "improvement observed"
+      }
+    },
+    {
+      "title": "Key Trend",
+      "content": "Description of an important trend identified in the sources.",
+      "icon": "📈"
+    },
+    {
+      "title": "Critical Insight",
+      "content": "An important insight that stands out from the analysis.",
+      "icon": "💡",
+      "stat": {
+        "value": "3x",
+        "label": "faster than baseline"
+      }
+    }
+  ],
+  "footer": "Generated from source documents — Notebook Plugin"
+}

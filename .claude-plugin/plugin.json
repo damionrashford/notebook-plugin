@@ -1,0 +1,33 @@
+{
+  "name": "notebook",
+  "version": "1.0.0",
+  "description": "NotebookLM-style research assistant — ingest PDFs, then generate audio overviews, slide decks, mind maps, reports, flashcards, quizzes, infographics, and data tables from your sources.",
+  "author": {
+    "name": "Damion Rashford"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/damionrashford/notebook-plugin",
+  "keywords": [
+    "notebook",
+    "pdf",
+    "rag",
+    "research",
+    "audio",
+    "slides",
+    "flashcards",
+    "quiz",
+    "mind-map",
+    "infographic",
+    "vectorize",
+    "embeddings",
+    "ocr"
+  ],
+  "commands": "./commands/",
+  "agents": [
+    "./agents/researcher.md",
+    "./agents/writer.md",
+    "./agents/critic.md"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json"
+}
