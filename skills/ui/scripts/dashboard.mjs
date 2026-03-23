@@ -137,7 +137,7 @@ const TYPE_META = {
   'mind-map':      { script: 'mind-map.mjs',     asset: 'mind-map.mmd' },
   infographic:     { script: 'infographic.mjs',  asset: 'infographic.json' },
   'data-table':    { script: 'data-table.mjs',   asset: 'data-table.json' },
-  'audio-overview':{ script: 'audio-overview.sh', asset: 'audio-overview.json' },
+  'audio-overview':{ script: 'audio-overview.py', asset: 'audio-overview.json' },
 };
 
 function broadcastJobs() {
@@ -204,8 +204,10 @@ async function processQueue() {
     const inputFile = join(outDir, `_${type}_input.json`);
     const genScript = join(GENERATE_DIR, meta.script);
     const isAudio = type === 'audio-overview';
-    const runner = isAudio ? 'bash' : needsBun.has(type) ? bunBin : 'node';
-    const genCmd = `"${runner}" "${genScript}" -i "${inputFile}" -o "${outDir}" --name ${type}${type === 'report' ? ' --format both' : ''}`;
+    const uvBin = process.env.UV_BIN || join(homedir(), '.local', 'bin', 'uv');
+    const runner = isAudio ? uvBin : needsBun.has(type) ? bunBin : 'node';
+    const runArgs = isAudio ? 'run --script' : '';
+    const genCmd = `"${runner}" ${runArgs} "${genScript}" -i "${inputFile}" -o "${outDir}" --name ${type}${type === 'report' ? ' --format both' : ''}`;
 
     const qualityRules = getQualityRules(type);
     const topicStr = topic ? ` about "${topic}"` : '';
@@ -331,7 +333,7 @@ function getQualityRules(type) {
     'mind-map': 'Valid Mermaid mindmap syntax. 3-6 main branches, 2-4 sub-topics. No ()[] in labels.',
     infographic: '5-8 sections with stats. Use emoji icons. Include stat values where possible.',
     'data-table': 'Specific data points from sources. Consistent columns. 10-30 rows.',
-    'audio-overview': '8-15 alternating segments, Alex and Samantha voices. Conversational. Strip URLs.',
+    'audio-overview': '8-15 alternating segments, af_heart and am_fenrir voices. Conversational. Strip URLs and special chars.',
   };
   return rules[type] || '';
 }

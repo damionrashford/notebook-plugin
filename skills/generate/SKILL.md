@@ -22,7 +22,7 @@ Generate one of 8 output types from ingested document sources.
 | `mind-map` | `/notebook:generate mind-map [topic]` | .mmd + .html (Mermaid viewer) |
 | `infographic` | `/notebook:generate infographic [topic]` | .html |
 | `data-table` | `/notebook:generate data-table [topic]` | .csv + .json + .md + .html (sortable/filterable) |
-| `audio-overview` | `/notebook:generate audio-overview [topic]` | .aiff |
+| `audio-overview` | `/notebook:generate audio-overview [topic]` | .wav (Kokoro TTS) |
 
 ## Workflow
 
@@ -71,8 +71,8 @@ node "${CLAUDE_SKILL_DIR}/scripts/infographic.mjs" -i <input> -o output --name i
 # Data table (bun auto-installs deps)
 bun "${CLAUDE_SKILL_DIR}/scripts/data-table.mjs" -i <input> -o output --name data-table
 
-# Audio overview (bash, macOS only)
-bash "${CLAUDE_SKILL_DIR}/scripts/audio-overview.sh" -i <input> -o output --name audio-overview
+# Audio overview (Kokoro TTS neural voice via uv, falls back to macOS say)
+uv run --script "${CLAUDE_SKILL_DIR}/scripts/audio-overview.py" -i <input> -o output --name audio-overview
 ```
 
 4. Report output paths. For HTML outputs, tell user: `open output/<name>.html`
@@ -92,7 +92,7 @@ bash "${CLAUDE_SKILL_DIR}/scripts/audio-overview.sh" -i <input> -o output --name
 
 - Always query sources first — ground all content in source material
 - Slide deck: `bullets` and `body` are mutually exclusive per slide
-- Audio: strip URLs and special characters (TTS mispronounces them)
+- Audio: uses Kokoro TTS (82M neural model). Best voices: `af_heart` (female, A-grade), `am_fenrir` (male, C+). Falls back to macOS `say` if Kokoro not installed. Strip URLs and special characters.
 - Mind map: Mermaid syntax is indentation-sensitive, avoid `()[]` in labels
 - Report DOCX: supports paragraphs and headings only (no tables/images)
 - Quiz MC: `answer` field is the letter (A/B/C/D), not the full text
