@@ -11,16 +11,16 @@ A NotebookLM-style research assistant plugin for [Claude Code](https://docs.anth
 
 ### Output types
 
-| Type | Description | Output files |
-|------|-------------|-------------|
-| Flashcards | Interactive study cards with flip animations, tag filtering, keyboard nav | .json + .md + .html |
-| Quiz | 50-question assessment with live scoring, letter grades, answer review | .json + .md + .html |
-| Report | Structured analysis with executive summary and evidence-backed findings | .md + .docx |
-| Slide Deck | Professional presentation with speaker notes | .pptx |
-| Mind Map | Interactive diagram with pan/zoom canvas and Mermaid rendering | .mmd + .html |
-| Infographic | Visual summary with scroll animations, floating TOC, and stat callouts | .html |
-| Data Table | Sortable/filterable table with search, pagination, and CSV/JSON export | .csv + .json + .md + .html |
-| Audio Overview | Podcast-style two-host discussion using macOS text-to-speech | .aiff |
+| Type | Generator | Output files |
+|------|-----------|-------------|
+| [Flashcards](skills/generate/scripts/flashcards.mjs) | Interactive study cards with flip animations, tag filtering, keyboard nav | .json + .md + .html |
+| [Quiz](skills/generate/scripts/quiz.mjs) | 50-question assessment with live scoring, letter grades, answer review | .json + .md + .html |
+| [Report](skills/generate/scripts/report.mjs) | Structured analysis with executive summary and evidence-backed findings | .md + .docx |
+| [Slide Deck](skills/generate/scripts/slide-deck.mjs) | Professional presentation with speaker notes | .pptx |
+| [Mind Map](skills/generate/scripts/mind-map.mjs) | Interactive diagram with pan/zoom canvas and Mermaid rendering | .mmd + .html |
+| [Infographic](skills/generate/scripts/infographic.mjs) | Visual summary with scroll animations, floating TOC, and stat callouts | .html |
+| [Data Table](skills/generate/scripts/data-table.mjs) | Sortable/filterable table with search, pagination, and CSV/JSON export | .csv + .json + .md + .html |
+| [Audio Overview](skills/generate/scripts/audio-overview.sh) | Podcast-style two-host discussion using macOS text-to-speech | .aiff |
 
 All HTML outputs feature a unified dark theme with Inter typography, Lucide icons, keyboard shortcuts, and responsive design.
 
@@ -102,9 +102,9 @@ The plugin uses three orchestrated agents:
 
 | Agent | Role | Access |
 |-------|------|--------|
-| **Researcher** | Deep document analysis — runs 5-10 queries to explore sources from multiple angles | Read-only |
-| **Writer** | Generates all output artifacts from research findings | Full write access |
-| **Critic** | Reviews outputs against source material, catches errors and gaps | Read-only |
+| [**Researcher**](agents/researcher.md) | Deep document analysis — runs 5-10 queries to explore sources from multiple angles | Read-only |
+| [**Writer**](agents/writer.md) | Generates all output artifacts from research findings | Full write access |
+| [**Critic**](agents/critic.md) | Reviews outputs against source material, catches errors and gaps | Read-only |
 
 **Pipeline flow**: Researcher analyzes sources -> Writer generates artifact -> Critic reviews against sources -> Writer revises if needed
 
