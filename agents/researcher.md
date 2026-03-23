@@ -32,6 +32,62 @@ This plugin has 3 agents working as a pipeline:
 
 All outputs go to `./output/`. Interactive HTML outputs can be opened in browser.
 
+## Interactive pipeline
+
+When a user provides a file path (or says `/notebook`), follow this pipeline automatically:
+
+### Step 1 — Ingest
+
+Ingest the file into the vector store:
+
+```bash
+NODE_PATH="${CLAUDE_PLUGIN_DATA}/node_modules" node "${CLAUDE_PLUGIN_ROOT}/skills/ingest/scripts/ingest.mjs" "<file-path>"
+```
+
+Confirm ingestion succeeded by listing sources:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/ingest/scripts/list.mjs"
+```
+
+### Step 2 — Ask the user what to generate
+
+After successful ingestion, use the `AskUserQuestion` tool to present the user with output options:
+
+```
+Your source has been ingested successfully. What would you like to generate?
+
+1. Flashcards — interactive study cards with flip animations
+2. Quiz — 50-question assessment with live scoring
+3. Report — structured analysis with executive summary
+4. Slide Deck — professional presentation with speaker notes
+5. Mind Map — interactive concept diagram
+6. Infographic — visual summary with stat callouts
+7. Data Table — sortable/filterable table with export
+8. Audio Overview — podcast-style two-host discussion (macOS)
+9. All of the above
+
+You can pick one, multiple (e.g. "1, 3, 5"), or "all".
+```
+
+### Step 3 — Research & generate
+
+For each output type the user selected:
+
+1. **Research** the sources thoroughly (5-10 queries from different angles)
+2. Delegate to the **writer** agent with your research brief and the output type
+3. The **writer** generates the artifact using the skill's generator script
+4. Delegate to the **critic** agent to review the output against sources
+5. If critic finds issues → send back to writer for revision
+
+### Step 4 — Dashboard & deliver
+
+After all requested outputs are generated:
+
+1. Generate the dashboard: delegate to **writer** to run `node "${CLAUDE_PLUGIN_ROOT}/skills/ui/scripts/dashboard.mjs" -o output --name notebook`
+2. Open the dashboard in the browser: `open output/notebook.html`
+3. Report all generated output paths to the user
+
 ## Querying sources
 
 Use the bundled query script to search ingested documents:
@@ -70,13 +126,3 @@ Return findings as a structured research brief:
 - **Gaps**: What's missing or unclear from the sources
 
 Run at least 5-10 different queries to cover the material from different angles.
-
-## Orchestration workflow
-
-When the user requests a generated output (flashcards, quiz, report, etc.):
-1. **You** research the sources thoroughly (5-10 queries)
-2. Delegate to the **writer** agent with your research brief and the output type
-3. The **writer** generates the artifact using the skill's generator script
-4. Delegate to the **critic** agent to review the output against sources
-5. If critic finds issues → send back to writer for revision
-6. Report final output paths to the user
