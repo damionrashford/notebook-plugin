@@ -20,11 +20,17 @@ A NotebookLM-style research assistant plugin for [Claude Code](https://docs.anth
 | [Mind Map](skills/generate/scripts/mind-map.mjs) | Interactive diagram with pan/zoom canvas and Mermaid rendering | .mmd + .html |
 | [Infographic](skills/generate/scripts/infographic.mjs) | Visual summary with scroll animations, floating TOC, and stat callouts | .html |
 | [Data Table](skills/generate/scripts/data-table.mjs) | Sortable/filterable table with search, pagination, and CSV/JSON export | .csv + .json + .md + .html |
-| [Audio Overview](skills/generate/scripts/audio-overview.sh) | Podcast-style two-host discussion using macOS text-to-speech | .aiff |
+| [Audio Overview](skills/generate/scripts/audio-overview.py) | Podcast-style two-host discussion using Kokoro-82M neural TTS | .wav |
 
 All HTML outputs feature a unified dark theme with Inter typography, Lucide icons, keyboard shortcuts, and responsive design.
 
 ## Installation
+
+```
+/init
+```
+
+This registers the plugin skills and prepares the environment. You can also install manually:
 
 ### From GitHub (marketplace)
 
@@ -41,9 +47,10 @@ All HTML outputs feature a unified dark theme with Inter typography, Lucide icon
 
 ### Requirements
 
-- **Node.js 18+** (for all generators and the RAG pipeline)
-- **macOS** (required only for Audio Overview — uses the `say` command)
-- Dependencies install automatically on first session via the SessionStart hook
+- **Bun 1.0+** (for scripts with npm dependencies — auto-installs on import)
+- **Node.js 18+** (for zero-dependency scripts and the dashboard server)
+- **uv** (for Audio Overview — runs Kokoro TTS with inline script deps)
+- **macOS** (required for Audio Overview AIFF→WAV transcode via `afconvert`)
 
 ## Usage
 
@@ -88,7 +95,7 @@ Generates a NotebookLM-style HTML dashboard showing your ingested sources, avail
 
 ```bash
 # Query the vector store directly
-NODE_PATH="~/.claude/plugins/data/notebook/node_modules" node skills/ingest/scripts/query.mjs "your question" --top-k 15
+bun skills/ingest/scripts/query.mjs "your question" --top-k 15
 
 # List ingested sources
 node skills/ingest/scripts/list.mjs
