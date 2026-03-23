@@ -2,6 +2,8 @@
 
 A NotebookLM-style research assistant plugin for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Ingest PDFs and text files, then generate rich outputs from your sources — all from the command line.
 
+![Dashboard Preview](assets/dashboard-preview.png)
+
 ## What it does
 
 1. **Ingest** PDFs or text files into a local vector store (with automatic OCR for scanned documents)
