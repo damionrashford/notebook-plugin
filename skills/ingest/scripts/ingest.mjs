@@ -1,18 +1,16 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Ingest a PDF or text file into the local vector store.
- * Usage: node ingest.mjs <file-path>
- *        node ingest.mjs --help
+ * Usage: bun ingest.mjs <file-path>
+ *        bun ingest.mjs --help
+ *
+ * Deps auto-installed by Bun.
  */
-import { readFile, writeFile, readdir, mkdir } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { join, dirname, resolve } from 'path';
+import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { createHash } from 'crypto';
-import { fileURLToPath } from 'url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SKILL_DIR = resolve(__dirname, '..');
 
 // ── Config ──────────────────────────────────────────────────────────
 const PLUGIN_DIR = join(homedir(), '.notebook-plugin');

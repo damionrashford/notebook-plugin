@@ -2,8 +2,8 @@
 name: generate
 description: Generate rich outputs from ingested sources — flashcards, quizzes, reports, slide decks, mind maps, infographics, data tables, or audio overviews. Use when the user wants to create any output from their documents.
 argument-hint: "<type> [topic]"
-compatibility: Requires Node.js 18+. Audio requires macOS (uses `say` command).
-allowed-tools: Bash(bash *) Bash(node *) Write Read
+compatibility: Requires Bun 1.0+ and Node.js 18+. Audio requires macOS (uses `say` command).
+allowed-tools: Bash(bash *) Bash(bun *) Bash(node *) Write Read
 effort: high
 ---
 
@@ -29,7 +29,7 @@ Generate one of 8 output types from ingested document sources.
 1. **Retrieve context** — query ingested sources:
 
 ```bash
-NODE_PATH="${CLAUDE_PLUGIN_DATA}/node_modules" node "${CLAUDE_PLUGIN_ROOT}/skills/ingest/scripts/query.mjs" "$ARGUMENTS" --top-k 15
+bun "${CLAUDE_PLUGIN_ROOT}/skills/ingest/scripts/query.mjs" "$ARGUMENTS" --top-k 15
 ```
 
 2. **Build input JSON** — see the relevant template in [assets/](assets/) for the schema:
@@ -56,11 +56,11 @@ node "${CLAUDE_SKILL_DIR}/scripts/flashcards.mjs" -i <input> -o output --name fl
 # Quiz (zero-dep)
 node "${CLAUDE_SKILL_DIR}/scripts/quiz.mjs" -i <input> -o output --name quiz
 
-# Report (needs NODE_PATH)
-NODE_PATH="${CLAUDE_PLUGIN_DATA}/node_modules" node "${CLAUDE_SKILL_DIR}/scripts/report.mjs" -i <input> -o output --name report --format both
+# Report (bun auto-installs deps)
+bun "${CLAUDE_SKILL_DIR}/scripts/report.mjs" -i <input> -o output --name report --format both
 
-# Slide deck (needs NODE_PATH)
-NODE_PATH="${CLAUDE_PLUGIN_DATA}/node_modules" node "${CLAUDE_SKILL_DIR}/scripts/slide-deck.mjs" -i <input> -o output --name slide-deck
+# Slide deck (bun auto-installs deps)
+bun "${CLAUDE_SKILL_DIR}/scripts/slide-deck.mjs" -i <input> -o output --name slide-deck
 
 # Mind map (zero-dep)
 node "${CLAUDE_SKILL_DIR}/scripts/mind-map.mjs" -i <input> -o output --name mind-map
@@ -68,8 +68,8 @@ node "${CLAUDE_SKILL_DIR}/scripts/mind-map.mjs" -i <input> -o output --name mind
 # Infographic (zero-dep)
 node "${CLAUDE_SKILL_DIR}/scripts/infographic.mjs" -i <input> -o output --name infographic
 
-# Data table (needs NODE_PATH)
-NODE_PATH="${CLAUDE_PLUGIN_DATA}/node_modules" node "${CLAUDE_SKILL_DIR}/scripts/data-table.mjs" -i <input> -o output --name data-table
+# Data table (bun auto-installs deps)
+bun "${CLAUDE_SKILL_DIR}/scripts/data-table.mjs" -i <input> -o output --name data-table
 
 # Audio overview (bash, macOS only)
 bash "${CLAUDE_SKILL_DIR}/scripts/audio-overview.sh" -i <input> -o output --name audio-overview

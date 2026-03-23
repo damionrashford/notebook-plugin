@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Notebook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>{{CSS}}</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-left">
+    <div class="logo"><i data-lucide="notebook-pen"></i></div>
+    <span class="header-title">Notebook</span>
+  </div>
+  <div class="header-right">
+    <span class="header-stat" id="stat-sources"><span class="live-dot"></span><strong id="source-count">0</strong> sources</span>
+    <span class="header-stat" id="stat-chunks"><strong id="chunk-count">0</strong> chunks</span>
+    <span class="header-stat" id="stat-outputs"><strong id="output-count">0</strong> outputs</span>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- LEFT: Sources -->
+  <div class="sidebar">
+    <div class="sidebar-head">
+      Sources
+      <div class="sidebar-head-right"><i data-lucide="plus" title="Add source"></i></div>
+    </div>
+    <div class="sidebar-body" id="sources-list"></div>
+    <div class="bottom-bar">
+      <span class="bottom-bar-text" id="sources-summary">Upload a source to get started</span>
+    </div>
+  </div>
+
+  <!-- CENTER: Main content area -->
+  <div class="center" id="center-panel"></div>
+
+  <!-- RIGHT: Studio -->
+  <div class="sidebar">
+    <div class="sidebar-head">
+      Studio
+      <div class="sidebar-head-right"><i data-lucide="panel-right-close" title="Toggle panel"></i></div>
+    </div>
+    <div class="sidebar-body">
+      <div class="studio-tiles" id="studio-tiles"></div>
+      <div class="studio-divider"></div>
+      <div id="studio-outputs"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const outputTypes = [
+  { id:'audio-overview', icon:'audio-lines', label:'Audio Overview' },
+  { id:'slide-deck', icon:'monitor', label:'Slide Deck' },
+  { id:'report', icon:'file-text', label:'Report' },
+  { id:'mind-map', icon:'git-fork', label:'Mind Map' },
+  { id:'flashcards', icon:'square-stack', label:'Flashcards' },
+  { id:'quiz', icon:'clipboard-list', label:'Quiz' },
+  { id:'infographic', icon:'bar-chart-3', label:'Infographic' },
+  { id:'data-table', icon:'table-2', label:'Data Table' },
+];
+
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+function iconForExt(ext) {
+  const m = { html:'globe', json:'braces', pptx:'presentation', docx:'file-text', aiff:'audio-lines', wav:'audio-lines', csv:'table-2', md:'file-text', mmd:'git-fork' };
+  return m[ext] || 'file';
+}
+
+let prevOutputNames = new Set();
+let currentJobs = {};
+let hasSources = false;
+let lastState = null;
+let activePreview = null; // { name, ext } when previewing a file
+
+// ── Preview system ──
+async function openPreview(fileName, ext, size) {
+  activePreview = { name: fileName, ext, size };
+  const center = document.getElementById('center-panel');
+  const href = '/outputs/' + encodeURIComponent(fileName);
+  center.className = 'center';
+  center.style.padding = '0';
+  center.style.alignItems = 'stretch';
+  center.style.justifyContent = 'stretch';
+
+  const toolbar = '<div class="preview-toolbar">'
+    + '<button class="preview-back" onclick="closePreview()"><i data-lucide="arrow-left"></i> Back</button>'
+    + '<span class="preview-filename">' + esc(fileName) + '</span>'
+    + '<a class="preview-dl" href="' + href + '" download><i data-lucide="download"></i> Download</a>'
+    + '</div>';
+
+  let body = '';
+  if (ext === 'html') {
+    body = '<div class="preview-body"><iframe src="' + href + '"></iframe></div>';
+  } else if (ext === 'aiff' || ext === 'wav') {
+    body = '<div class="preview-body"><div class="preview-audio-wrap">'
+      + '<i data-lucide="audio-lines" class="preview-audio-icon"></i>'
+      + '<span class="preview-audio-name">' + esc(fileName) + '</span>'
+      + '<audio controls src="' + href + '"></audio>'
+      + '</div></div>';
+  } else if (ext === 'csv') {
+    body = '<div class="preview-body"><div class="preview-table-wrap" id="preview-content">Loading...</div></div>';
+  } else if (ext === 'json') {
+    body = '<div class="preview-body"><div class="preview-json" id="preview-content">Loading...</div></div>';
+  } else if (ext === 'mmd') {
+    body = '<div class="preview-body"><div class="preview-mermaid" id="preview-content">Loading...</div></div>';
+  } else if (ext === 'md') {
+    body = '<div class="preview-body"><div class="preview-md" id="preview-content">Loading...</div></div>';
+  } else if (ext === 'pptx' || ext === 'docx') {
+    body = '<div class="preview-body"><div class="preview-binary">'
+      + '<i data-lucide="' + iconForExt(ext) + '" class="preview-binary-icon"></i>'
+      + '<span class="preview-binary-name">' + esc(fileName) + '</span>'
+      + '<span class="preview-binary-size">' + esc(size) + '</span>'
+      + '<a class="preview-binary-dl" href="' + href + '" download><i data-lucide="download"></i> Download ' + ext.toUpperCase() + '</a>'
+      + '</div></div>';
+  } else {
+    body = '<div class="preview-body"><div class="preview-text" id="preview-content">Loading...</div></div>';
+  }
+
+  center.innerHTML = '<div class="preview">' + toolbar + body + '</div>';
+  lucide.createIcons();
+
+  // Fetch text content for non-iframe types
+  if (['csv','json','md','mmd'].includes(ext)) {
+    try {
+      const res = await fetch(href);
+      const text = await res.text();
+      const el = document.getElementById('preview-content');
+      if (!el) return;
+
+      if (ext === 'csv') {
+        el.innerHTML = csvToTable(text);
+      } else if (ext === 'json') {
+        el.innerHTML = highlightJson(text);
+      } else if (ext === 'md') {
+        el.innerHTML = renderMarkdown(text);
+      } else if (ext === 'mmd') {
+        // Render mermaid diagram — load library once, reuse on subsequent previews
+        const renderMmd = () => {
+          window.mermaid.initialize({ startOnLoad: false, theme: 'dark', themeVariables: {
+            primaryColor: '#7c6aff', primaryTextColor: '#e8e8ec', primaryBorderColor: '#333338',
+            lineColor: '#333338', secondaryColor: '#242428', tertiaryColor: '#1a1a1e',
+            background: '#1a1a1e', mainBkg: '#242428', nodeBorder: '#333338', nodeTextColor: '#e8e8ec'
+          }});
+          el.innerHTML = '<pre class="mermaid">' + esc(text) + '</pre>';
+          window.mermaid.run({ nodes: el.querySelectorAll('.mermaid') });
+        };
+        try {
+          if (window.mermaid) {
+            renderMmd();
+          } else if (!document.getElementById('mermaid-script')) {
+            const mmdScript = document.createElement('script');
+            mmdScript.id = 'mermaid-script';
+            mmdScript.src = 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js';
+            mmdScript.onload = renderMmd;
+            document.head.appendChild(mmdScript);
+          }
+        } catch {
+          el.innerHTML = '<pre style="font-family:var(--mono);font-size:13px;line-height:1.6;color:var(--text-2)">' + esc(text) + '</pre>';
+        }
+      }
+    } catch { const el = document.getElementById('preview-content'); if (el) el.textContent = 'Failed to load file.'; }
+  }
+}
+
+function closePreview() {
+  activePreview = null;
+  const center = document.getElementById('center-panel');
+  center.style.padding = '';
+  center.style.alignItems = '';
+  center.style.justifyContent = '';
+  if (lastState) renderCenter(lastState);
+}
+
+function csvToTable(text) {
+  const lines = text.trim().split('\n');
+  if (lines.length === 0) return '<p>Empty CSV</p>';
+  const parseRow = row => {
+    const cols = []; let cur = '', inQ = false;
+    for (let i = 0; i < row.length; i++) {
+      const c = row[i];
+      if (c === '"') { inQ = !inQ; continue; }
+      if (c === ',' && !inQ) { cols.push(cur.trim()); cur = ''; continue; }
+      cur += c;
+    }
+    cols.push(cur.trim());
+    return cols;
+  };
+  const headers = parseRow(lines[0]);
+  const rows = lines.slice(1).filter(l => l.trim()).map(parseRow);
+  return '<table class="preview-table"><thead><tr>'
+    + headers.map(h => '<th>' + esc(h) + '</th>').join('')
+    + '</tr></thead><tbody>'
+    + rows.map(r => '<tr>' + r.map(c => '<td>' + esc(c) + '</td>').join('') + '</tr>').join('')
+    + '</tbody></table>';
+}
+
+function highlightJson(text) {
+  try {
+    const obj = JSON.parse(text);
+    const pretty = JSON.stringify(obj, null, 2);
+    return pretty.replace(/("(?:[^"\\]|\\.)*")\s*:/g, '<span class="key">$1</span>:')
+      .replace(/:\s*("(?:[^"\\]|\\.)*")/g, ': <span class="str">$1</span>')
+      .replace(/:\s*(-?\d+\.?\d*)/g, ': <span class="num">$1</span>')
+      .replace(/:\s*(true|false)/g, ': <span class="bool">$1</span>')
+      .replace(/:\s*(null)/g, ': <span class="null">$1</span>');
+  } catch {
+    return esc(text);
+  }
+}
+
+function renderMarkdown(text) {
+  const lines = text.split('\n');
+  // Two-pass: collect table ranges, then rebuild with tables as HTML blocks
+  const parts = []; // { type:'text', line } or { type:'table', html }
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].trim().startsWith('|') && i + 1 < lines.length && /^\|[\s-:|]+\|$/.test(lines[i + 1].trim())) {
+      const tableLines = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      const parseRow = r => r.split('|').slice(1, -1).map(c => c.trim());
+      const headers = parseRow(tableLines[0]);
+      const rows = tableLines.slice(2).filter(l => l.trim()).map(parseRow);
+      let table = '<table class="preview-table"><thead><tr>' + headers.map(h => '<th>' + esc(h) + '</th>').join('') + '</tr></thead><tbody>';
+      for (const row of rows) table += '<tr>' + row.map(c => '<td>' + esc(c) + '</td>').join('') + '</tr>';
+      table += '</tbody></table>';
+      parts.push({ type: 'table', html: table });
+    } else {
+      parts.push({ type: 'text', line: lines[i] });
+      i++;
+    }
+  }
+
+  // Group consecutive text lines, then apply markdown transforms per group
+  let result = '';
+  let textBuf = [];
+  const flushText = () => {
+    if (textBuf.length === 0) return;
+    let html = esc(textBuf.join('\n'));
+    html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+    html = html.replace(/^---$/gm, '<hr style="border:none;border-top:1px solid var(--border-light);margin:16px 0">');
+    html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+    html = html.replace(/^(?!<[hupblo]|<\/|<hr)(.+)$/gm, '<p>$1</p>');
+    result += html;
+    textBuf = [];
+  };
+  for (const part of parts) {
+    if (part.type === 'table') {
+      flushText();
+      result += part.html;
+    } else {
+      textBuf.push(part.line);
+    }
+  }
+  flushText();
+  return result;
+}
+
+// ── Render functions ──
+function renderCenter(state) {
+  const { sources, outputs } = state;
+  const center = document.getElementById('center-panel');
+
+  if (activePreview) return; // Don't overwrite active preview
+
+  if (sources.length === 0 && outputs.length === 0) {
+    center.className = 'center';
+    center.style.padding = ''; center.style.alignItems = ''; center.style.justifyContent = '';
+    center.innerHTML = '<div class="center-empty"><i data-lucide="upload" class="center-empty-icon"></i><h2>Add a source to get started</h2><p>Ingest a PDF or text file, then generate Audio Overviews, Reports, Flashcards, Mind Maps, and more.</p><div class="center-empty-btn"><i data-lucide="file-plus"></i> /notebook:ingest &lt;file&gt;</div></div>';
+  } else if (outputs.length === 0) {
+    center.className = 'center';
+    center.style.padding = ''; center.style.alignItems = ''; center.style.justifyContent = '';
+    center.innerHTML = '<div class="center-empty"><i data-lucide="wand-sparkles" class="center-empty-icon"></i><h2>Ready to generate</h2><p>Your sources are loaded. Pick an output type from the Studio panel to create something.</p><div class="center-empty-btn"><i data-lucide="sparkles"></i> /notebook:generate &lt;type&gt;</div></div>';
+  } else {
+    center.className = 'center has-outputs';
+    center.style.padding = ''; center.style.alignItems = ''; center.style.justifyContent = '';
+    const newOutputNames = new Set(outputs.map(o => o.name));
+    center.innerHTML = '<div class="center-outputs-head"><span class="center-outputs-title">Generated Outputs</span><span class="center-outputs-count">' + outputs.length + ' file' + (outputs.length !== 1 ? 's' : '') + '</span></div><div class="output-list">' +
+      outputs.map(o => {
+        const isNew = !prevOutputNames.has(o.name);
+        const badge = o.isHtml ? '<span class="output-badge output-badge--view">View</span>'
+          : ['pptx','docx','aiff','wav','csv','json','md','mmd'].includes(o.ext) ? '<span class="output-badge output-badge--dl">' + o.ext + '</span>' : '';
+        return '<div class="output-item output-item--link' + (isNew ? ' new-file' : '') + '" data-file="' + esc(o.name) + '" data-ext="' + o.ext + '" data-size="' + esc(o.size) + '"><i data-lucide="' + iconForExt(o.ext) + '" class="output-icon"></i><span class="output-name">' + esc(o.name) + '</span>' + badge + '<span class="output-size">' + o.size + '</span></div>';
+      }).join('') + '</div>';
+    prevOutputNames = newOutputNames;
+
+    // Bind click handlers for inline preview
+    center.querySelectorAll('.output-item[data-file]').forEach(el => {
+      el.addEventListener('click', () => {
+        openPreview(el.dataset.file, el.dataset.ext, el.dataset.size);
+      });
+    });
+  }
+}
+
+function render(state) {
+  const { sources, totalChunks, outputs, jobs } = state;
+  if (jobs) currentJobs = jobs;
+  hasSources = sources.length > 0;
+  lastState = state;
+
+  // Header stats
+  document.getElementById('source-count').textContent = sources.length;
+  document.getElementById('chunk-count').textContent = totalChunks;
+  document.getElementById('output-count').textContent = outputs.length;
+
+  // Flash stat chips only when values actually change
+  const newCounts = { 'stat-sources': sources.length, 'stat-chunks': totalChunks, 'stat-outputs': outputs.length };
+  ['stat-sources','stat-chunks','stat-outputs'].forEach(id => {
+    const el = document.getElementById(id);
+    if (render._prevCounts && render._prevCounts[id] !== newCounts[id]) {
+      el.classList.add('flash');
+      setTimeout(() => el.classList.remove('flash'), 800);
+    }
+  });
+  render._prevCounts = newCounts;
+
+  // Sources list
+  const srcEl = document.getElementById('sources-list');
+  if (sources.length === 0) {
+    srcEl.innerHTML = '<div class="sidebar-empty"><i data-lucide="file-text" class="sidebar-empty-icon"></i><p class="sidebar-empty-title">Saved sources will appear here</p><p class="sidebar-empty-desc">Run <code>/notebook:ingest</code> to add PDFs or text files.</p></div>';
+  } else {
+    srcEl.innerHTML = sources.map(s =>
+      '<div class="source-item"><i data-lucide="' + (s.type === 'pdf' ? 'book-open' : 'file-text') + '" class="source-icon"></i><div class="source-details"><span class="source-name">' + esc(s.name) + '</span><span class="source-meta">' + (s.pages ? s.pages + ' pg ' : '') + s.chunks + ' chunks</span></div></div>'
+    ).join('');
+  }
+
+  // Sources summary
+  document.getElementById('sources-summary').innerHTML = sources.length === 0
+    ? 'Upload a source to get started'
+    : '<strong>' + sources.length + '</strong> source' + (sources.length !== 1 ? 's' : '');
+
+  // Center panel
+  renderCenter(state);
+
+  // Studio tiles with job status
+  const tilesEl = document.getElementById('studio-tiles');
+  tilesEl.innerHTML = outputTypes.map(t => {
+    const hasOutput = outputs.some(o => o.name.toLowerCase().startsWith(t.id));
+    const job = currentJobs[t.id];
+    const isRunning = job && job.status === 'running';
+    const isQueued = job && job.status === 'queued';
+    const isDone = job && job.status === 'done';
+    const isError = job && job.status === 'error';
+    const isBusy = isRunning || isQueued;
+    const phase = job && job.phase;
+    const phaseLabel = phase === 'querying' ? 'Querying...' : phase === 'generating' ? 'Generating...' : phase === 'building' ? 'Building...' : isQueued ? 'Queued...' : 'Generating...';
+    const statusDot = isBusy ? '<span class="tile-status running"></span>'
+      : (isDone || hasOutput) ? '<span class="tile-status done"></span>'
+      : isError ? '<span class="tile-status error" title="' + esc(job.error || 'Failed') + '"></span>'
+      : '';
+    return '<div class="studio-tile' + (isBusy ? ' generating' : '') + '" data-type="' + t.id + '" title="' + (isBusy ? phaseLabel : 'Click to generate ' + t.label) + '"><i data-lucide="' + t.icon + '"></i><span>' + (isBusy ? phaseLabel : t.label) + '</span>' + statusDot + '</div>';
+  }).join('');
+
+  // Studio outputs — also clickable for preview
+  const studioOut = document.getElementById('studio-outputs');
+  if (outputs.length === 0) {
+    studioOut.innerHTML = '<div class="studio-empty"><i data-lucide="wand-sparkles" class="studio-empty-icon"></i><p class="studio-empty-title">Studio output will be saved here.</p><p class="studio-empty-desc">After adding sources, generate an Audio Overview, Report, Mind Map, and more.</p></div>';
+  } else {
+    studioOut.innerHTML = outputs.slice(0, 8).map(o => {
+      return '<div class="output-item output-item--link" data-file="' + esc(o.name) + '" data-ext="' + o.ext + '" data-size="' + esc(o.size) + '"><i data-lucide="' + iconForExt(o.ext) + '" class="output-icon"></i><span class="output-name">' + esc(o.name) + '</span><span class="output-size">' + o.size + '</span></div>';
+    }).join('');
+    studioOut.querySelectorAll('.output-item[data-file]').forEach(el => {
+      el.addEventListener('click', () => {
+        openPreview(el.dataset.file, el.dataset.ext, el.dataset.size);
+      });
+    });
+  }
+
+  // Re-render Lucide icons
+  lucide.createIcons();
+
+  // Bind tile click handlers — trigger generation
+  document.querySelectorAll('.studio-tile').forEach(tile => {
+    tile.addEventListener('click', async () => {
+      const type = tile.dataset.type;
+      if (tile.classList.contains('generating')) return;
+      if (!hasSources) {
+        showToast('Ingest a source first: /notebook:ingest <file>', 'alert-circle');
+        return;
+      }
+      tile.classList.add('generating');
+      showToast('Starting ' + type + ' generation...', 'loader');
+      try {
+        const res = await fetch('/api/generate/' + encodeURIComponent(type), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const data = await res.json();
+        if (data.error) {
+          showToast(data.error, 'alert-circle');
+          tile.classList.remove('generating');
+        } else {
+          showToast(type + ' generation started — this may take a minute', 'sparkles');
+        }
+      } catch (err) {
+        showToast('Failed to start generation', 'alert-circle');
+        tile.classList.remove('generating');
+      }
+    });
+  });
+}
+
+function showToast(msg, icon) {
+  const el = document.getElementById('toast');
+  el.innerHTML = '<i data-lucide="' + (icon || 'check-circle') + '"></i> ' + esc(msg);
+  lucide.createIcons({ nodes: [el] });
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// SSE — live updates with polling fallback
+const evtSource = new EventSource('/api/events');
+let fallbackInterval = null;
+evtSource.onmessage = (e) => {
+  try { render(JSON.parse(e.data)); } catch {}
+};
+evtSource.onerror = () => {
+  evtSource.close();
+  if (fallbackInterval) return; // only create one fallback
+  fallbackInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/state');
+      render(await res.json());
+    } catch {}
+  }, 3000);
+};
+</script>
+</body>
+</html>

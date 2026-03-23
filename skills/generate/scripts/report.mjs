@@ -1,20 +1,16 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Generate a report in Markdown and/or DOCX format.
- * Usage: node generate.mjs -i <input.json> -o <output-dir> [--name report] [--format md|docx|both]
+ * Usage: bun report.mjs -i <input.json> -o <output-dir> [--name report] [--format md|docx|both]
  *
  * Input JSON (markdown): { "content": "# Full markdown content..." }
  * Input JSON (docx):     { "title": "...", "sections": [{ "heading": "...", "body": "..." }] }
  *
  * Outputs: .md and/or .docx
- * Requires: docx (installed via skill's package.json) — only for DOCX output
+ * Deps auto-installed by Bun.
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { join, resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SKILL_DIR = resolve(__dirname, '..');
+import { join, resolve } from 'path';
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -33,8 +29,7 @@ function parseArgs() {
 }
 
 async function generateDocx(data, outDir, name) {
-  const docxPath = join(SKILL_DIR, 'node_modules', 'docx');
-  const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import(docxPath);
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import('docx');
 
   const children = [
     new Paragraph({ text: data.title, heading: HeadingLevel.TITLE, spacing: { after: 400 } }),

@@ -29,9 +29,39 @@ function parseArgs() {
   return opts;
 }
 
+function sanitizeLabel(label) {
+  return label
+    .replace(/[()[\]{}]/g, '')     // remove shape-syntax chars
+    .replace(/—/g, '-')            // em-dash to hyphen
+    .replace(/–/g, '-')            // en-dash to hyphen
+    .replace(/'/g, '')             // remove smart quotes
+    .replace(/'/g, '')
+    .replace(/"/g, '')
+    .replace(/"/g, '')
+    .replace(/&/g, 'and')
+    .replace(/</g, '')
+    .replace(/>/g, '')
+    .replace(/`/g, '')
+    .trim();
+}
+
+function sanitizeMermaid(mmd) {
+  return mmd.split('\n').map((line, i) => {
+    if (i === 0) return line; // keep 'mindmap' directive
+    const match = line.match(/^(\s*)(root\(\(.*\)\))?(.*)$/);
+    if (match && match[2]) return line; // keep root((...)) as-is
+    // Sanitize label part (preserve indentation)
+    const indent = line.match(/^(\s*)/)[1];
+    const label = line.slice(indent.length);
+    if (!label) return line;
+    return indent + sanitizeLabel(label);
+  }).join('\n');
+}
+
 function nodeToMermaid(node, depth = 0) {
   const indent = '  '.repeat(depth);
-  let result = `${indent}${node.label}\n`;
+  const label = depth === 1 ? node.label : sanitizeLabel(node.label);
+  let result = `${indent}${label}\n`;
   if (node.children) {
     for (const child of node.children) {
       result += nodeToMermaid(child, depth + 1);
@@ -356,7 +386,7 @@ function main() {
 
   let mermaid;
   if (opts.isMermaid) {
-    mermaid = readFileSync(resolve(opts.input), 'utf-8');
+    mermaid = sanitizeMermaid(readFileSync(resolve(opts.input), 'utf-8'));
   } else {
     const root = JSON.parse(readFileSync(resolve(opts.input), 'utf-8'));
     mermaid = `mindmap\n${nodeToMermaid(root, 1)}`;

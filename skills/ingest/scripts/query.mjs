@@ -1,15 +1,14 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Query the vector store for relevant chunks.
- * Usage: node query.mjs "<question>" [--top-k N]
+ * Usage: bun query.mjs "<question>" [--top-k N]
+ *
+ * Deps auto-installed by Bun.
  */
-import { existsSync, readFileSync, mkdirSync } from 'fs';
-import { join, dirname, resolve } from 'path';
+import { existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
 import { homedir } from 'os';
 import { createHash } from 'crypto';
-import { fileURLToPath } from 'url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── Config ──────────────────────────────────────────────────────────
 const PLUGIN_DIR = join(homedir(), '.notebook-plugin');

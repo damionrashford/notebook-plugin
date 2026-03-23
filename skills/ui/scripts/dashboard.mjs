@@ -1,490 +1,463 @@
 #!/usr/bin/env node
 /**
- * NotebookLM-style dashboard generator.
- * Reads source metadata + output directory state and produces a self-contained HTML dashboard.
- * Zero dependencies — uses only Node.js builtins.
+ * NotebookLM-style dashboard — live local server.
+ *
+ * Serves an interactive dashboard at http://localhost:3456
+ * with real-time updates via SSE when output files change.
+ *
+ * Usage: node dashboard.mjs -o <output-dir> [--name notebook] [--port 3456]
+ *
+ * Zero npm dependencies — Node.js builtins only.
  */
-import { writeFileSync, readFileSync, readdirSync, statSync, existsSync, mkdirSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { createServer } from 'node:http';
+import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, watch, unlinkSync } from 'node:fs';
+import { join, extname, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
+import { spawn, execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-// --- CLI args ---
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// ── CLI args ────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
-let outDir = '.', name = 'notebook';
+let outDir = './output', name = 'notebook', port = 3456;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '-o' && args[i + 1]) outDir = args[++i];
   if (args[i] === '--name' && args[i + 1]) name = args[++i];
+  if (args[i] === '--port' && args[i + 1]) port = parseInt(args[++i], 10);
 }
+outDir = resolve(outDir);
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
-// --- Gather sources ---
+// ── Data gathering ──────────────────────────────────────────────────
 const pluginDir = join(homedir(), '.notebook-plugin');
 const storesDir = join(pluginDir, 'stores');
-let sources = [];
-let totalChunks = 0;
-let storePath = '';
 
-if (existsSync(storesDir)) {
-  const projectHash = createHash('md5').update(process.cwd()).digest('hex').slice(0, 12);
-  storePath = join(storesDir, projectHash);
-  const metaPath = join(storePath, 'meta.json');
-  if (existsSync(metaPath)) {
-    try {
-      const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
-      sources = meta.sources || [];
-      totalChunks = meta.totalChunks || 0;
-    } catch {}
+function gatherSources() {
+  let sources = [];
+  let totalChunks = 0;
+  if (existsSync(storesDir)) {
+    const projectHash = createHash('md5').update(process.cwd()).digest('hex').slice(0, 12);
+    const metaPath = join(storesDir, projectHash, 'meta.json');
+    if (existsSync(metaPath)) {
+      try {
+        const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
+        const raw = meta.sources || {};
+        if (Array.isArray(raw)) {
+          sources = raw;
+        } else {
+          sources = Object.values(raw).map(s => ({
+            name: s.fileName || s.name || 'Unknown',
+            type: (s.fileName || '').endsWith('.pdf') ? 'pdf' : 'text',
+            pages: s.pageCount || s.pages || 0,
+            chunks: s.chunkCount || s.chunks || 0,
+          }));
+        }
+        totalChunks = meta.totalChunks || sources.reduce((sum, s) => sum + (s.chunks || 0), 0);
+      } catch {}
+    }
   }
+  return { sources, totalChunks };
 }
 
-// --- Gather outputs ---
-let outputs = [];
-if (existsSync(outDir)) {
+function gatherOutputs() {
+  if (!existsSync(outDir)) return [];
   try {
-    const files = readdirSync(outDir).filter(f => !f.startsWith('_') && !f.startsWith('.'));
-    outputs = files.map(f => {
-      const fp = join(outDir, f);
-      const st = statSync(fp);
-      const ext = extname(f).slice(1);
-      return {
-        name: f,
-        ext,
-        size: st.size < 1024 ? `${st.size} B` : st.size < 1048576 ? `${(st.size / 1024).toFixed(1)} KB` : `${(st.size / 1048576).toFixed(1)} MB`,
-        modifiedMs: st.mtime.getTime(),
-        isHtml: ext === 'html' && f !== `${name}.html`,
-      };
-    }).sort((a, b) => b.modifiedMs - a.modifiedMs);
-  } catch {}
+    return readdirSync(outDir)
+      .filter(f => !f.startsWith('_') && !f.startsWith('.') && f !== `${name}.html`)
+      .map(f => {
+        const fp = join(outDir, f);
+        const st = statSync(fp);
+        const ext = extname(f).slice(1);
+        return {
+          name: f,
+          ext,
+          size: st.size < 1024 ? `${st.size} B` : st.size < 1048576 ? `${(st.size / 1024).toFixed(1)} KB` : `${(st.size / 1048576).toFixed(1)} MB`,
+          modifiedMs: st.mtime.getTime(),
+          isHtml: ext === 'html',
+        };
+      })
+      .sort((a, b) => b.modifiedMs - a.modifiedMs);
+  } catch { return []; }
 }
 
-// --- Output types ---
-const outputTypes = [
-  { id: 'audio-overview', icon: 'audio-lines', label: 'Audio Overview' },
-  { id: 'slide-deck', icon: 'monitor', label: 'Slide Deck' },
-  { id: 'report', icon: 'file-text', label: 'Report' },
-  { id: 'mind-map', icon: 'git-fork', label: 'Mind Map' },
-  { id: 'flashcards', icon: 'square-stack', label: 'Flashcards' },
-  { id: 'quiz', icon: 'clipboard-list', label: 'Quiz' },
-  { id: 'infographic', icon: 'bar-chart-3', label: 'Infographic' },
-  { id: 'data-table', icon: 'table-2', label: 'Data Table' },
-];
+function getState() {
+  const { sources, totalChunks } = gatherSources();
+  return { sources, totalChunks, outputs: gatherOutputs() };
+}
 
-// --- Helpers ---
-const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// ── SSE clients ─────────────────────────────────────────────────────
+const sseClients = new Set();
 
-// --- Build HTML sections ---
-const sourcesHtml = sources.length === 0
-  ? `<div class="sidebar-empty">
-      <i data-lucide="file-text" class="sidebar-empty-icon"></i>
-      <p class="sidebar-empty-title">Saved sources will appear here</p>
-      <p class="sidebar-empty-desc">Run <code>/notebook:ingest</code> to add PDFs, text files, or other documents.</p>
-    </div>`
-  : sources.map(s => `
-    <div class="source-item">
-      <i data-lucide="${s.type === 'pdf' ? 'book-open' : 'file-text'}" class="source-icon"></i>
-      <div class="source-details">
-        <span class="source-name">${esc(s.name)}</span>
-        <span class="source-meta">${s.pages ? s.pages + ' pg' : ''} ${s.chunks} chunks</span>
-      </div>
-    </div>`).join('\n');
+function broadcast(data) {
+  const jobState = {};
+  for (const [type, job] of jobs) jobState[type] = job;
+  const payload = { ...data, jobs: jobState };
+  const msg = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const res of sseClients) {
+    try { res.write(msg); } catch { sseClients.delete(res); }
+  }
+}
 
-const studioTilesHtml = outputTypes.map(t => `
-  <div class="studio-tile" title="/notebook:generate ${t.id}">
-    <i data-lucide="${t.icon}"></i>
-    <span>${t.label}</span>
-  </div>`).join('\n');
+// Watch output dir for changes
+let debounce = null;
+watch(outDir, { persistent: false }, () => {
+  clearTimeout(debounce);
+  debounce = setTimeout(() => broadcast(getState()), 300);
+});
 
-const studioOutputsHtml = outputs.length === 0
-  ? `<div class="studio-empty">
-      <i data-lucide="wand-sparkles" class="studio-empty-icon"></i>
-      <p class="studio-empty-title">Studio output will be saved here.</p>
-      <p class="studio-empty-desc">After adding sources, generate an Audio Overview, Report, Mind Map, and more.</p>
-    </div>`
-  : outputs.map(o => `
-    <${o.isHtml ? 'a' : 'div'} class="output-item${o.isHtml ? ' output-item--link' : ''}" ${o.isHtml ? `href="${esc(o.name)}" target="_blank"` : ''}>
-      <i data-lucide="${o.ext === 'html' ? 'globe' : o.ext === 'json' ? 'braces' : o.ext === 'pptx' ? 'presentation' : o.ext === 'aiff' ? 'audio-lines' : 'file-text'}" class="output-icon"></i>
-      <span class="output-name">${esc(o.name)}</span>
-      <span class="output-size">${o.size}</span>
-    </${o.isHtml ? 'a' : 'div'}>`).join('\n');
+// Also watch meta.json for source changes
+const projectHash = createHash('md5').update(process.cwd()).digest('hex').slice(0, 12);
+const metaDir = join(storesDir, projectHash);
+if (existsSync(metaDir)) {
+  watch(metaDir, { persistent: false }, (_, filename) => {
+    if (filename === 'meta.json') {
+      clearTimeout(debounce);
+      debounce = setTimeout(() => broadcast(getState()), 300);
+    }
+  });
+}
 
-const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Notebook</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"><\/script>
-<style>
-  :root {
-    --bg: #1a1a1e;
-    --surface: #242428;
-    --surface-hover: #2c2c32;
-    --border: #333338;
-    --border-light: #2a2a2f;
-    --text: #e8e8ec;
-    --text-2: #a0a0a8;
-    --text-3: #68686f;
-    --accent: #7c6aff;
-    --accent-dim: rgba(124,106,255,0.08);
-    --radius: 12px;
-    --radius-sm: 8px;
-    --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    --mono: 'SF Mono', 'Fira Code', monospace;
-  }
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body {
-    font-family: var(--font);
-    background: var(--bg);
-    color: var(--text);
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    -webkit-font-smoothing: antialiased;
-    overflow: hidden;
-  }
-  a { color:inherit; text-decoration:none; }
-  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:4px; }
+// ── Generation jobs ──────────────────────────────────────────────────
+const jobs = new Map(); // type -> { status, startedAt, error? }
+const PLUGIN_ROOT = resolve(__dirname, '..', '..', '..');
+const QUERY_SCRIPT = join(PLUGIN_ROOT, 'skills', 'ingest', 'scripts', 'query.mjs');
+const GENERATE_DIR = join(PLUGIN_ROOT, 'skills', 'generate', 'scripts');
+const ASSETS_DIR = join(PLUGIN_ROOT, 'skills', 'generate', 'assets');
 
-  /* ── Header ── */
-  .header {
-    height: 56px;
-    padding: 0 20px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  .header-left { display:flex; align-items:center; gap:12px; }
-  .logo {
-    width:32px; height:32px;
-    background: linear-gradient(135deg, var(--accent), #a78bfa);
-    border-radius: var(--radius-sm);
-    display:flex; align-items:center; justify-content:center;
-  }
-  .logo i { width:16px; height:16px; color:#fff; }
-  .header-title { font-size:15px; font-weight:600; letter-spacing:-0.01em; }
-  .header-right { display:flex; align-items:center; gap:8px; }
-  .header-stat {
-    font-size:12px; color:var(--text-3);
-    padding:4px 10px;
-    background:var(--surface);
-    border-radius:20px;
-  }
-  .header-stat strong { color:var(--text-2); font-weight:600; }
+// Scripts that need bun (have npm deps auto-installed by bun)
+const needsBun = new Set(['report', 'slide-deck', 'data-table']);
 
-  /* ── Three-column layout ── */
-  .layout {
-    flex:1;
-    display:grid;
-    grid-template-columns:280px 1fr 280px;
-    min-height:0;
-  }
+const TYPE_META = {
+  flashcards:      { script: 'flashcards.mjs',  asset: 'flashcards.json' },
+  quiz:            { script: 'quiz.mjs',         asset: 'quiz.json' },
+  report:          { script: 'report.mjs',       asset: 'report-docx.json' },
+  'slide-deck':    { script: 'slide-deck.mjs',   asset: 'slide-deck.json' },
+  'mind-map':      { script: 'mind-map.mjs',     asset: 'mind-map.mmd' },
+  infographic:     { script: 'infographic.mjs',  asset: 'infographic.json' },
+  'data-table':    { script: 'data-table.mjs',   asset: 'data-table.json' },
+  'audio-overview':{ script: 'audio-overview.sh', asset: 'audio-overview.json' },
+};
 
-  /* ── Sidebar shared ── */
-  .sidebar {
-    border-right:1px solid var(--border);
-    display:flex;
-    flex-direction:column;
-    overflow:hidden;
+function broadcastJobs() {
+  const jobState = {};
+  for (const [type, job] of jobs) jobState[type] = job;
+  const msg = `data: ${JSON.stringify({ ...getState(), jobs: jobState })}\n\n`;
+  for (const res of sseClients) {
+    try { res.write(msg); } catch { sseClients.delete(res); }
   }
-  .sidebar:last-child { border-right:none; border-left:1px solid var(--border); }
-  .sidebar-head {
-    padding:16px 20px;
-    font-size:13px;
-    font-weight:600;
-    color:var(--text-2);
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    border-bottom:1px solid var(--border-light);
-    flex-shrink:0;
-  }
-  .sidebar-head-right { display:flex; align-items:center; gap:4px; }
-  .sidebar-head-right i { width:16px; height:16px; color:var(--text-3); cursor:pointer; opacity:0.6; }
-  .sidebar-head-right i:hover { opacity:1; }
-  .sidebar-body {
-    flex:1;
-    overflow-y:auto;
-    padding:8px;
-  }
-  .sidebar-body::-webkit-scrollbar { width:4px; }
-  .sidebar-body::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
+}
 
-  /* ── Sources ── */
-  .source-item {
-    display:flex;
-    align-items:center;
-    gap:10px;
-    padding:10px 12px;
-    border-radius:var(--radius-sm);
-    transition:background 0.15s;
-    cursor:default;
-  }
-  .source-item:hover { background:var(--surface); }
-  .source-icon { width:18px; height:18px; color:var(--text-3); flex-shrink:0; }
-  .source-details { min-width:0; }
-  .source-name {
-    display:block;
-    font-size:13px; font-weight:500;
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  }
-  .source-meta { font-size:11px; color:var(--text-3); }
+// ── Single-session generation pipeline ──────────────────────────────
+// One claude session is created on the first generate request.
+// All subsequent requests --resume into the same session.
+// Source content is loaded ONCE via vector query in the first call.
+// Each output type is a follow-up prompt in the same conversation.
 
-  /* ── Center panel ── */
-  .center {
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    justify-content:center;
-    padding:40px;
-    overflow-y:auto;
-    position:relative;
-  }
-  .center-empty {
-    text-align:center;
-    max-width:420px;
-  }
-  .center-empty-icon {
-    width:48px; height:48px;
-    color:var(--accent);
-    opacity:0.5;
-    margin-bottom:20px;
-  }
-  .center-empty h2 {
-    font-size:20px;
-    font-weight:600;
-    color:var(--text);
-    margin-bottom:8px;
-  }
-  .center-empty p {
-    font-size:14px;
-    color:var(--text-3);
-    line-height:1.6;
-    margin-bottom:24px;
-  }
-  .center-empty-btn {
-    display:inline-flex;
-    align-items:center;
-    gap:8px;
-    padding:10px 24px;
-    background:var(--surface);
-    border:1px solid var(--border);
-    border-radius:var(--radius);
-    font-size:14px;
-    color:var(--text-2);
-    cursor:default;
-    transition:all 0.15s;
-  }
-  .center-empty-btn:hover { border-color:var(--accent); color:var(--text); }
-  .center-empty-btn i { width:16px; height:16px; }
+let sessionId = null;
+const jobQueue = [];
+let isProcessing = false;
+const claudeBin = process.env.CLAUDE_BIN || '/opt/homebrew/bin/claude';
+const bunBin = process.env.BUN_BIN || join(homedir(), '.bun', 'bin', 'bun');
+const claudeEnv = {
+  ...process.env,
+  PATH: `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${homedir()}/.bun/bin:${process.env.PATH || ''}`,
+  CLAUDECODE: '',  // Allow nested invocation from dashboard server
+};
 
-  /* Center — with outputs */
-  .center-outputs {
-    align-items:stretch;
-    justify-content:flex-start;
-    padding:24px 32px;
+function enqueueGeneration(type, topic) {
+  if (jobs.has(type) && jobs.get(type).status === 'running') {
+    return { error: `${type} is already generating` };
   }
-  .center-outputs-head {
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    margin-bottom:16px;
-  }
-  .center-outputs-title { font-size:14px; font-weight:600; color:var(--text-2); }
-  .center-outputs-count { font-size:12px; color:var(--text-3); }
-  .output-list { display:flex; flex-direction:column; gap:2px; }
-  .output-item {
-    display:grid;
-    grid-template-columns:20px 1fr auto;
-    align-items:center;
-    gap:10px;
-    padding:10px 12px;
-    border-radius:var(--radius-sm);
-    transition:background 0.15s;
-  }
-  .output-item:hover { background:var(--surface); }
-  .output-item--link { cursor:pointer; }
-  .output-item--link:hover { background:var(--surface-hover); }
-  .output-icon { width:16px; height:16px; color:var(--text-3); }
-  .output-item:hover .output-icon { color:var(--text-2); }
-  .output-name { font-size:13px; font-weight:400; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .output-size { font-size:11px; color:var(--text-3); font-variant-numeric:tabular-nums; }
+  const meta = TYPE_META[type];
+  if (!meta) return { error: `Unknown type: ${type}` };
+  const { sources } = gatherSources();
+  if (sources.length === 0) return { error: 'No sources ingested yet' };
 
-  /* Bottom bar */
-  .bottom-bar {
-    padding:16px 20px;
-    border-top:1px solid var(--border-light);
-    display:flex;
-    align-items:center;
-    gap:12px;
-    flex-shrink:0;
-  }
-  .bottom-bar-text { flex:1; font-size:13px; color:var(--text-3); }
-  .bottom-bar-text strong { color:var(--text-2); }
-  .bottom-bar-arrow {
-    width:32px; height:32px;
-    display:flex; align-items:center; justify-content:center;
-    background:var(--surface);
-    border-radius:50%;
-    transition:background 0.15s;
-    cursor:default;
-  }
-  .bottom-bar-arrow:hover { background:var(--surface-hover); }
-  .bottom-bar-arrow i { width:16px; height:16px; color:var(--text-2); }
+  jobs.set(type, { status: 'queued', startedAt: Date.now() });
+  broadcastJobs();
+  jobQueue.push({ type, topic, meta });
+  processQueue();
+  return { status: 'queued', type, position: jobQueue.length };
+}
 
-  /* ── Studio tiles ── */
-  .studio-tiles {
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:4px;
-    padding:4px 0;
-  }
-  .studio-tile {
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    gap:6px;
-    padding:16px 8px;
-    border-radius:var(--radius-sm);
-    cursor:default;
-    transition:background 0.15s;
-    text-align:center;
-  }
-  .studio-tile:hover { background:var(--surface); }
-  .studio-tile i { width:22px; height:22px; color:var(--text-2); }
-  .studio-tile:hover i { color:var(--text); }
-  .studio-tile span {
-    font-size:11px; color:var(--text-3); font-weight:500;
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-    max-width:100%;
-  }
-  .studio-tile:hover span { color:var(--text-2); }
+async function processQueue() {
+  if (isProcessing || jobQueue.length === 0) return;
+  isProcessing = true;
+  const { type, topic, meta } = jobQueue.shift();
 
-  .studio-divider {
-    height:1px;
-    background:var(--border-light);
-    margin:4px 8px;
+  try {
+    jobs.set(type, { status: 'running', startedAt: Date.now(), phase: 'querying' });
+    broadcastJobs();
+
+    // ── PHASE 1: Query vector store locally (~2s, no LLM) ──
+    const chunks = await runCommand(bunBin, [QUERY_SCRIPT, topic || 'main concepts key ideas overview', '--top-k', '25']);
+    if (!chunks.trim()) throw new Error('No content found in vector store');
+
+    // ── PHASE 2: claude -p generates structured JSON (single LLM call) ──
+    jobs.set(type, { ...jobs.get(type), phase: 'generating' });
+    broadcastJobs();
+
+    const assetPath = join(ASSETS_DIR, meta.asset);
+    const template = existsSync(assetPath) ? readFileSync(assetPath, 'utf-8') : '';
+    const inputFile = join(outDir, `_${type}_input.json`);
+    const genScript = join(GENERATE_DIR, meta.script);
+    const isAudio = type === 'audio-overview';
+    const runner = isAudio ? 'bash' : needsBun.has(type) ? bunBin : 'node';
+    const genCmd = `"${runner}" "${genScript}" -i "${inputFile}" -o "${outDir}" --name ${type}${type === 'report' ? ' --format both' : ''}`;
+
+    const qualityRules = getQualityRules(type);
+    const topicStr = topic ? ` about "${topic}"` : '';
+
+    // Build the prompt — if first call, include source material.
+    // If resuming, source material is already in conversation context.
+    let prompt;
+    if (!sessionId) {
+      prompt = `You are a content generator for the Notebook plugin. Your job is to produce structured JSON output from source material, then run the generator script.
+
+SOURCE MATERIAL FROM VECTOR STORE:
+${chunks.slice(0, 80000)}
+
+---
+
+Now generate ${type}${topicStr}.
+
+INSTRUCTIONS:
+1. Write the input JSON file to "${inputFile}". Schema:
+\`\`\`
+${template}
+\`\`\`
+Quality: ${qualityRules}
+Ground ALL content in the source material above. Do NOT invent facts.
+
+2. Run the generator:
+\`\`\`bash
+${genCmd}
+\`\`\`
+
+3. Confirm the output was created.`;
+    } else {
+      prompt = `Now generate ${type}${topicStr} from the same source material.
+
+1. Write the input JSON to "${inputFile}". Schema:
+\`\`\`
+${template}
+\`\`\`
+Quality: ${qualityRules}
+
+2. Run the generator:
+\`\`\`bash
+${genCmd}
+\`\`\`
+
+3. Confirm the output was created.`;
+    }
+
+    const result = await runClaude(prompt);
+
+    // Capture session ID from the first call for --resume
+    if (!sessionId && result.sessionId) {
+      sessionId = result.sessionId;
+    }
+
+    // Clean up temp input file
+    const tempInput = join(outDir, `_${type}_input.json`);
+    try { if (existsSync(tempInput)) unlinkSync(tempInput); } catch {}
+
+    jobs.set(type, { status: 'done', startedAt: jobs.get(type)?.startedAt, finishedAt: Date.now() });
+    broadcastJobs();
+    setTimeout(() => broadcast(getState()), 300);
+  } catch (err) {
+    jobs.set(type, { status: 'error', error: err.message, startedAt: jobs.get(type)?.startedAt, finishedAt: Date.now() });
+    broadcastJobs();
   }
 
-  /* ── Sidebar empty states ── */
-  .sidebar-empty, .studio-empty {
-    text-align:center;
-    padding:32px 16px;
-  }
-  .sidebar-empty-icon, .studio-empty-icon {
-    width:28px; height:28px;
-    color:var(--text-3);
-    opacity:0.5;
-    margin-bottom:12px;
-  }
-  .sidebar-empty-title, .studio-empty-title {
-    font-size:13px; font-weight:500; color:var(--text-2);
-    margin-bottom:4px;
-  }
-  .sidebar-empty-desc, .studio-empty-desc {
-    font-size:12px; color:var(--text-3); line-height:1.5;
-  }
-  .sidebar-empty-desc code {
-    font-family:var(--mono);
-    font-size:11px;
-    color:var(--accent);
-    background:var(--accent-dim);
-    padding:2px 6px;
-    border-radius:4px;
+  isProcessing = false;
+  processQueue(); // Process next in queue
+}
+
+// Run a local command and return stdout
+function runCommand(cmd, cmdArgs) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, cmdArgs, { cwd: process.cwd(), env: claudeEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    child.stdout.on('data', d => { out += d; });
+    child.stderr.on('data', d => { err += d; });
+    child.on('close', code => code === 0 ? resolve(out) : reject(new Error(err.slice(-300) || `Exit ${code}`)));
+    child.on('error', reject);
+  });
+}
+
+// Run claude -p (or --resume) with the plugin loaded for agent access
+function runClaude(prompt) {
+  return new Promise((resolve, reject) => {
+    const baseArgs = [
+      '-p', prompt,
+      '--allowedTools', 'Bash(*),Write(*),Read(*)',
+      '--output-format', 'json',
+      '--plugin-dir', PLUGIN_ROOT,
+    ];
+    // Resume into same session after first call
+    const args = sessionId
+      ? [...baseArgs, '--resume', sessionId]
+      : baseArgs;
+
+    const child = spawn(claudeBin, args, { cwd: process.cwd(), env: claudeEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    child.stdout.on('data', d => { out += d; });
+    child.stderr.on('data', d => { err += d; });
+    const timer = setTimeout(() => { try { child.kill(); } catch {} reject(new Error('Timed out after 4 minutes')); }, 240000);
+    child.on('close', code => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error(`Claude exited ${code}: ${err.slice(-300)}`));
+      try {
+        const parsed = JSON.parse(out);
+        resolve({ result: parsed.result || '', sessionId: parsed.session_id || null });
+      } catch {
+        resolve({ result: out, sessionId: null });
+      }
+    });
+    child.on('error', (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
+function getQualityRules(type) {
+  const rules = {
+    flashcards: '15-30 cards, no yes/no questions, tagged by topic. Front: specific question. Back: detailed answer.',
+    quiz: '50 questions, 70% multiple_choice / 30% short_answer. MC answer is letter (A/B/C/D). Explanations for all.',
+    report: 'Executive summary + 4-6 evidence-backed sections. Actionable conclusions.',
+    'slide-deck': '8-15 slides, 3-5 bullets each. bullets and body are mutually exclusive. Speaker notes.',
+    'mind-map': 'Valid Mermaid mindmap syntax. 3-6 main branches, 2-4 sub-topics. No ()[] in labels.',
+    infographic: '5-8 sections with stats. Use emoji icons. Include stat values where possible.',
+    'data-table': 'Specific data points from sources. Consistent columns. 10-30 rows.',
+    'audio-overview': '8-15 alternating segments, Alex and Samantha voices. Conversational. Strip URLs.',
+  };
+  return rules[type] || '';
+}
+
+// ── MIME types ───────────────────────────────────────────────────────
+const MIME = {
+  html: 'text/html', json: 'application/json', css: 'text/css',
+  js: 'application/javascript', mjs: 'application/javascript',
+  md: 'text/markdown', csv: 'text/csv', txt: 'text/plain',
+  pdf: 'application/pdf', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  aiff: 'audio/aiff', mmd: 'text/plain', svg: 'image/svg+xml',
+  png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif',
+};
+
+// ── HTTP server ─────────────────────────────────────────────────────
+const server = createServer((req, res) => {
+  const url = new URL(req.url, `http://localhost:${port}`);
+  const path = url.pathname;
+
+  // API: state
+  if (path === '/api/state') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify(getState()));
+    return;
   }
 
-  /* ── Responsive ── */
-  @media (max-width:960px) {
-    .layout { grid-template-columns:1fr; grid-template-rows:auto 1fr auto; }
-    .sidebar { border-right:none; border-bottom:1px solid var(--border); max-height:200px; }
-    .sidebar:last-child { border-left:none; border-top:1px solid var(--border); border-bottom:none; max-height:240px; }
-    .studio-tiles { grid-template-columns:repeat(4,1fr); }
+  // API: SSE events
+  if (path === '/api/events') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    });
+    const jobState = {};
+    for (const [type, job] of jobs) jobState[type] = job;
+    res.write(`data: ${JSON.stringify({ ...getState(), jobs: jobState })}\n\n`);
+    sseClients.add(res);
+    req.on('close', () => sseClients.delete(res));
+    return;
   }
-  @media (max-width:600px) {
-    .studio-tiles { grid-template-columns:repeat(2,1fr); }
-    .header-stat { display:none; }
+
+  // API: generate
+  if (path.startsWith('/api/generate/') && req.method === 'POST') {
+    const type = decodeURIComponent(path.slice(14));
+    let body = '';
+    req.on('data', d => { body += d; });
+    req.on('end', () => {
+      let topic = '';
+      try { topic = JSON.parse(body).topic || ''; } catch {}
+      const result = enqueueGeneration(type, topic);
+      const status = result.error ? 400 : 200;
+      res.writeHead(status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify(result));
+    });
+    return;
   }
-</style>
-</head>
-<body>
 
-<header class="header">
-  <div class="header-left">
-    <div class="logo"><i data-lucide="notebook-pen"></i></div>
-    <span class="header-title">Notebook</span>
-  </div>
-  <div class="header-right">
-    <span class="header-stat"><strong>${sources.length}</strong> sources</span>
-    <span class="header-stat"><strong>${totalChunks}</strong> chunks</span>
-  </div>
-</header>
+  // API: jobs
+  if (path === '/api/jobs') {
+    const jobState = {};
+    for (const [type, job] of jobs) jobState[type] = job;
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify(jobState));
+    return;
+  }
 
-<div class="layout">
-  <!-- LEFT: Sources -->
-  <div class="sidebar">
-    <div class="sidebar-head">
-      Sources
-      <div class="sidebar-head-right"><i data-lucide="plus" title="Add source"></i></div>
-    </div>
-    <div class="sidebar-body">
-      ${sourcesHtml}
-    </div>
-    <div class="bottom-bar">
-      <span class="bottom-bar-text">${sources.length === 0 ? 'Upload a source to get started' : `<strong>${sources.length}</strong> source${sources.length !== 1 ? 's' : ''}`}</span>
-      <div class="bottom-bar-arrow"><i data-lucide="arrow-right"></i></div>
-    </div>
-  </div>
+  // CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+    res.end();
+    return;
+  }
 
-  <!-- CENTER: Main content area -->
-  <div class="center${outputs.length > 0 ? ' center-outputs' : ''}">
-    ${outputs.length === 0 ? `
-    <div class="center-empty">
-      <i data-lucide="upload" class="center-empty-icon"></i>
-      <h2>Add a source to get started</h2>
-      <p>Ingest a PDF or text file, then generate Audio Overviews, Reports, Flashcards, Mind Maps, and more.</p>
-      <div class="center-empty-btn"><i data-lucide="file-plus"></i> /notebook:ingest &lt;file&gt;</div>
-    </div>
-    ` : `
-    <div class="center-outputs-head">
-      <span class="center-outputs-title">Generated Outputs</span>
-      <span class="center-outputs-count">${outputs.length} file${outputs.length !== 1 ? 's' : ''}</span>
-    </div>
-    <div class="output-list">
-      ${outputs.map(o => `
-        <${o.isHtml ? 'a' : 'div'} class="output-item${o.isHtml ? ' output-item--link' : ''}" ${o.isHtml ? `href="${esc(o.name)}" target="_blank"` : ''}>
-          <i data-lucide="${o.ext === 'html' ? 'globe' : o.ext === 'json' ? 'braces' : o.ext === 'pptx' ? 'presentation' : o.ext === 'aiff' ? 'audio-lines' : 'file-text'}" class="output-icon"></i>
-          <span class="output-name">${esc(o.name)}</span>
-          <span class="output-size">${o.size}</span>
-        </${o.isHtml ? 'a' : 'div'}>`).join('\\n')}
-    </div>
-    `}
-  </div>
+  // Serve output files (with AIFF→WAV transcode for browser playback)
+  if (path.startsWith('/outputs/')) {
+    const fileName = decodeURIComponent(path.slice(9));
+    const filePath = join(outDir, fileName);
+    if (!existsSync(filePath) || !filePath.startsWith(outDir)) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+    const ext = extname(fileName).slice(1);
+    // Browsers can't play AIFF — transcode to WAV on-the-fly via macOS afconvert
+    if (ext === 'aiff') {
+      const wavPath = filePath.replace(/\.aiff$/, '.wav');
+      if (!existsSync(wavPath)) {
+        try { execSync(`afconvert -f WAVE -d LEI16 "${filePath}" "${wavPath}"`, { stdio: 'pipe' }); }
+        catch { /* serve original if transcode fails */ }
+      }
+      if (existsSync(wavPath)) {
+        res.writeHead(200, { 'Content-Type': 'audio/wav' });
+        res.end(readFileSync(wavPath));
+        return;
+      }
+    }
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    res.end(readFileSync(filePath));
+    return;
+  }
 
-  <!-- RIGHT: Studio -->
-  <div class="sidebar">
-    <div class="sidebar-head">
-      Studio
-      <div class="sidebar-head-right"><i data-lucide="panel-right-close" title="Toggle panel"></i></div>
-    </div>
-    <div class="sidebar-body">
-      <div class="studio-tiles">
-        ${studioTilesHtml}
-      </div>
-      <div class="studio-divider"></div>
-      ${studioOutputsHtml}
-    </div>
-  </div>
-</div>
+  // Dashboard HTML
+  if (path === '/' || path === '/index.html') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(buildDashboardHtml());
+    return;
+  }
 
-<script>lucide.createIcons();<\/script>
-</body>
-</html>`;
+  res.writeHead(404);
+  res.end('Not found');
+});
 
-const outPath = join(outDir, `${name}.html`);
-writeFileSync(outPath, html);
-console.log(JSON.stringify({ output: outPath, sources: sources.length, chunks: totalChunks, outputs: outputs.length }));
+server.listen(port, () => {
+  const url = `http://localhost:${port}`;
+  console.log(JSON.stringify({ server: url, outputDir: outDir }));
+  console.error(`\n  Notebook dashboard running at ${url}\n`);
+  // Auto-open in browser
+  import('child_process').then(({ exec }) => exec(`open ${url}`));
+});
+
+// ── Dashboard HTML (SPA with live updates) ──────────────────────────
+const dashboardDir = join(__dirname, '..', 'dashboard');
+function buildDashboardHtml() {
+  const css = readFileSync(join(dashboardDir, 'index.css'), 'utf8');
+  const htmlTemplate = readFileSync(join(dashboardDir, 'index.html'), 'utf8');
+  return htmlTemplate.replace('{{CSS}}', css);
+}

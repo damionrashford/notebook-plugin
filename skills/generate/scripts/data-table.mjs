@@ -1,19 +1,15 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Generate data table outputs from JSON input.
- * Usage: node generate.mjs -i <input.json> -o <output-dir> [--name data-table]
+ * Usage: bun data-table.mjs -i <input.json> -o <output-dir> [--name data-table]
  *
  * Input JSON: { "title": "...", "headers": ["A","B"], "rows": [["a1","b1"], ...] }
  * Outputs: .csv + .json + .md + .html (interactive sortable/filterable table)
  *
- * Requires: csv-stringify (installed via skill's package.json)
+ * Deps auto-installed by Bun.
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { join, resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SKILL_DIR = resolve(__dirname, '..');
+import { join, resolve } from 'path';
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -570,7 +566,7 @@ async function main() {
   mkdirSync(outDir, { recursive: true });
 
   // CSV
-  const { stringify } = await import(join(SKILL_DIR, 'node_modules', 'csv-stringify', 'lib', 'sync.js'));
+  const { stringify } = await import('csv-stringify/sync');
   const csvContent = stringify([data.headers, ...data.rows]);
   const csvPath = join(outDir, `${opts.name}.csv`);
   writeFileSync(csvPath, csvContent);

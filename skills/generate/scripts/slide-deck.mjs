@@ -1,22 +1,16 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Generate a PowerPoint slide deck from JSON input.
- * Usage: node generate.mjs -i <input.json> -o <output-dir> [--name slide-deck]
+ * Usage: bun slide-deck.mjs -i <input.json> -o <output-dir> [--name slide-deck]
  *
  * Input JSON: { "title": "...", "subtitle": "...", "author": "...", "slides": [{ "title": "...", "bullets": [...], "notes": "...", "body": "..." }] }
  * Outputs: .pptx
  *
- * Requires: pptxgenjs (installed via skill's package.json)
+ * Deps auto-installed by Bun.
  */
 import { readFileSync, mkdirSync } from 'fs';
-import { join, resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SKILL_DIR = resolve(__dirname, '..');
-
-// Resolve pptxgenjs from skill's own node_modules
-const PptxGenJS = (await import(join(SKILL_DIR, 'node_modules', 'pptxgenjs', 'dist', 'pptxgenjs.es.js'))).default;
+import { join, resolve } from 'path';
+import PptxGenJS from 'pptxgenjs';
 
 const THEME = {
   bg: '1a1a2e',
